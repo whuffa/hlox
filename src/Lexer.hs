@@ -2,16 +2,16 @@ module Lexer (lexes) where
 
 import Prelude hiding (lex)
 import Data.Char
-import Data.List
-import Tok (Literal(..), Token(..)) 
+import Data.List (stripPrefix)
+import Tok (Literal(..), Token, TokenType(..)) 
 
-lexes :: String -> [Token]
+lexes :: String -> [TokenType]
 lexes = lexer symbols keywords where
     symbols = [".", ",", "+", "-", "*", "/", "(", ")", "{", "}", ";", "==", "=", "<=", ">=", "<", ">", "||", "&&", "!=",  "!"]
     keywords = ["fun", "var", "if", "else", "true", "false", "class", "nil", "return", "for", "print", "super", "while", "this"]
 
 
-lexer :: [String] -> [String] -> String -> [Token]
+lexer :: [String] -> [String] -> String -> [TokenType]
 lexer symbols keywords str = lex str where
     lex [] = []
     lex (c:cs)
@@ -21,11 +21,11 @@ lexer symbols keywords str = lex str where
       | c == '"' = lexString cs
       | otherwise = lexSym symbols (c:cs)
 
-    lexString :: String -> [Token]
+    lexString :: String -> [TokenType]
     lexString _str = Lit (Str first) : lex rest where
         (first, _:rest) = span (/= '\"') _str
 
-    lexSym :: [String] -> String -> [Token]
+    lexSym :: [String] -> String -> [TokenType]
     lexSym (s:ss) cs =
         case stripPrefix s cs of
             Nothing -> lexSym ss cs
