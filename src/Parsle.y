@@ -7,7 +7,7 @@ import Tok
 }
 
 %name parsle
-%tokentype { Token }
+%tokentype { TokenType }
 %error { happyError }
 
 %token
@@ -17,16 +17,15 @@ import Tok
     '/'   { Symbol "/" }
     '=='  { Symbol "==" }
     '!='  { Symbol "!=" }
-    '!'   { Symbol "!" }
+    'not'   { Symbol "!" }
     '<'   { Symbol "<" }
     '<='  { Symbol "<=" }
     '>'   { Symbol ">" }
     '>='  { Symbol ">=" }
     '('   { Symbol "(" }
     ')'   { Symbol ")" }
-    "or"  { TokenKeyword "or" }
-    "and" { TokenKeyword "and" }
-    "not" { TokenKeyword "not" }
+    'or'  { Symbol "||"}
+    'and' { Symbol "&&" }
     literal { Lit $$ }
 
 %left '==' '!='
@@ -45,12 +44,21 @@ Exp :: { Expr }
     | Exp '*' Exp   { Binary Mul $1 $3 }
     | Exp '/' Exp   { Binary Div $1 $3 }
     | '-' Exp       %prec "NEGATE" { Unary Neg $2 }
+    | 'not' Exp     { Unary Not $2 } 
     | '(' Exp ')'   { Group $2 }
+    | Exp 'and' Exp { Binary And $1 $3 }
+    | Exp 'or' Exp  { Binary Or $1 $3 }
+    | Exp '==' Exp  { Binary EQ $1 $3 }
+    | Exp '!=' Exp  { Binary NE $1 $3 }
+    | Exp '>=' Exp  { Binary GE $1 $3 }
+    | Exp '<=' Exp  { Binary LE $1 $3 }
+    | Exp '>' Exp   { Binary GT $1 $3 }
+    | Exp '<' Exp   { Binary LT $1 $3 }
     | literal       { Litr $1 }
 
 {
 
 
-happyError :: [Token] -> a
+happyError :: [TokenType] -> a
 happyError toks = error $ "Parse error at " ++ show toks
 }
