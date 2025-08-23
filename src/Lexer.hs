@@ -3,7 +3,7 @@ module Lexer (lexes) where
 import Prelude hiding (lex)
 import Data.Char
 import Data.List (stripPrefix)
-import Tok (Literal(..), Token, TokenType(..)) 
+import Tok (Literal(..), TokenType(..)) 
 
 lexes :: String -> [TokenType]
 lexes = lexer symbols keywords where

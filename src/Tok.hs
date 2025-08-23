@@ -1,8 +1,9 @@
-module Tok (Literal(..), Line, Token(..), TokenType(..), Pos(..)) where
+module Tok (Literal(..), Line, Token(..), TokenType(..), Pos(..), stringPos) where
 
 data Literal = Number Double
              | Str String
              | LBool Bool
+             | LNil
     deriving (Show, Eq)
 
 data TokenType 
@@ -20,3 +21,6 @@ data Pos = Pos { getLine :: Int,
 data Token = Token { getType :: TokenType,
                      getPos :: Pos }
                      deriving(Show)
+
+stringPos :: Pos -> String
+stringPos (Pos x y) = "(Line " ++ (show x) ++ ", Col " ++ (show y)  ++ ")"

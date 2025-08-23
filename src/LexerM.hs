@@ -1,4 +1,4 @@
-module LexerM (lexes) where
+module LexerM (lexes, printTokens) where
 
 {-
 Currently, this lexes and reads in one pass. This leads to the awkward
@@ -13,10 +13,8 @@ import Prelude hiding (lex)
 import Check(Check(..))
 import Data.Char(isSpace, isAlpha, isAlphaNum, isNumber)
 import Data.List(stripPrefix)
-import Tok(Literal(..), Token(..), TokenType(..), Pos(..))
+import Tok(Literal(..), Token(..), TokenType(..), Pos(..), stringPos)
 import Control.Monad.State
---import Control.Monad(liftM)
-
 -- data LexerState = LexerState {
 --     getCode :: String,
 --     lexerPos :: Pos
@@ -27,17 +25,27 @@ type Lexer a = StateT LexerState Check a
 symbols :: [String]
 symbols = [".", ",", "++", "+", "-", "*", "/", "(", ")", "{", "}", ";", "==", "=", "<=", ">=", "<", ">", "||", "&&", "!=",  "!"]
 keywords :: [String]
-keywords = ["fun", "var", "if", "else", "true", "false", "class", "nil", "return", "for", "print", "super", "while", "this"]
+keywords = ["fun", "var", "if", "else", "class", "return", "for", "print", "super", "while", "this"]
+literals :: [(String, Literal)]
+literals = [("true", LBool True), 
+            ("false", LBool False),
+            ("nil", LNil)]
 
-lexes :: String -> IO ()
-lexes code = case runStateT lex $ (code, Pos 1 1) of
-    Checked (tokens, _) -> printTokens tokens
-    Error string -> print(string)
+dictFind :: (Eq a) => a -> [(a, b)] -> Maybe b
+dictFind _ [] = Nothing
+dictFind key ((k, v):ds)
+    | key == k = Just v
+    | otherwise = dictFind key ds
+
+lexes :: String -> Check [Token]
+lexes code = do
+    (tokens, _) <- runStateT lex $ (code, Pos 1 1)
+    return tokens
 
 printTokens :: [Token] -> IO ()
 printTokens [] = return ()
 printTokens (t:ts) = do
-    print $ (\(Token tt pos) -> (show tt) ++ stringPos pos) t
+    putStrLn $ (\(Token tt pos) -> (show tt) ++ stringPos pos) t
     printTokens ts
 
 lex :: Lexer [Token]
@@ -87,10 +95,12 @@ lexAlpha = do
         colOffset = length first
         newPos = addCols pos colOffset
     put (rest, newPos)
-    let tok = if first `elem` keywords
-        then TokenKeyword
-        else TokenIdent
-    return $ Token (tok first) pos
+    let token = case dictFind first literals of
+            Just t -> Lit t
+            Nothing -> if first `elem` keywords
+                then TokenKeyword first
+                else TokenIdent first
+    return $ Token token pos
 
 
 lexDouble :: Lexer Token
@@ -163,6 +173,3 @@ checkPrefix pre = do
 
 addCols :: Pos -> Int -> Pos
 addCols (Pos x y) offset = Pos x (y + offset)
-
-stringPos :: Pos -> String
-stringPos (Pos x y) = "(Line " ++ (show x) ++ ", Col " ++ (show y)  ++ ")"

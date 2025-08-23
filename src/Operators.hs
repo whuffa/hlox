@@ -1,7 +1,7 @@
 module Operators (BinaryOp(..), UnaryOp(..), Expr(..)) where
 
 import Prelude hiding (EQ)
-import Tok (Literal)
+import Tok (Literal, Pos)
 
 data BinaryOp = Add | Sub | Mul | Div |
                 And | Or | GT | LT | LE |
@@ -12,8 +12,8 @@ data UnaryOp = Neg | Not
     deriving (Show, Eq)
 
 data Expr
-    = Litr Literal
-    | Unary UnaryOp Expr
-    | Binary BinaryOp Expr Expr
-    | Group Expr
+    = Litr Literal Pos
+    | Unary UnaryOp Expr Pos
+    | Binary BinaryOp Expr Expr Pos
+    | Group Expr Pos
     deriving (Eq, Show)

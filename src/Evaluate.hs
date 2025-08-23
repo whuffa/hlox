@@ -1,7 +1,7 @@
 module Evaluate(evaluate, Value(..)) where
 
 import Operators
-import Tok (Literal(..))
+import Tok (Literal(..), stringPos)
 import Prelude hiding(EQ, GT, LT)
 
 data Value
@@ -15,6 +15,7 @@ truthiness :: Value -> Bool
 truthiness (NumVal 0) = False
 truthiness (StringVal "") = False
 truthiness (BoolVal bool) = bool
+truthiness Nil = False
 truthiness _ = True
 
 truth :: Expr -> Bool
@@ -27,24 +28,39 @@ stringifyVal (StringVal str) = str
 stringifyVal Nil = "Nil"
 
 evaluate :: Expr -> Value
-evaluate (Litr lit) = case lit of
+evaluate (Litr lit _) = case lit of
     (Number num) -> (NumVal num)
     (Str str) -> (StringVal str)
     (LBool bool) -> (BoolVal bool)
-evaluate (Binary Or op1 op2) = BoolVal $ if truth op1
+    LNil -> Nil
+evaluate (Binary Or op1 op2 _) = BoolVal $ if truth op1
     then True
     else truth op2
-evaluate (Binary And op1 op2) = BoolVal $ if not (truth op1)
+evaluate (Binary And op1 op2 _) = BoolVal $ if not (truth op1)
     then False
     else truth op2
-evaluate (Binary operator op1 op2) =
+evaluate (Binary EQ op1 op2 _) = BoolVal $ case (evaluate op1, evaluate op2) of
+    (NumVal x, NumVal y) -> x == y
+    (StringVal x, StringVal y) -> x == y
+    (BoolVal x, BoolVal y) -> x == y
+    _ -> False
+evaluate (Binary NE op1 op2 _) = BoolVal $ case (evaluate op1, evaluate op2) of
+    (NumVal x, NumVal y) -> x /= y
+    (StringVal x, StringVal y) -> x /= y
+    (BoolVal x, BoolVal y) -> x /= y
+    _ -> True
+evaluate (Binary operator op1 op2 pos) =
     case (evaluate op1, evaluate op2) of
-        (NumVal x, NumVal y) -> NumVal $ case operator of
-            Add -> x + y
-            Sub -> x - y
-            Mul -> x * y
-            Div -> x / y
-            op -> error $ "operator: " ++ (show op) ++ "not defined for numbers"
+        (NumVal x, NumVal y) -> case operator of
+            Add -> NumVal $ x + y
+            Sub -> NumVal $ x - y
+            Mul -> NumVal $ x * y
+            Div -> NumVal $ x / y
+            LT -> BoolVal $ x < y
+            LE -> BoolVal $ x <= y
+            GT -> BoolVal $ x > y
+            GE -> BoolVal $ x >= y
+            --op -> error $ "operator: " ++ (show op) ++ "not defined for numbers " ++ stringPos pos
         (StringVal x, y) -> case operator of
             Add -> StringVal $ x ++ stringifyVal y
             _ -> error "piss"
@@ -53,11 +69,11 @@ evaluate (Binary operator op1 op2) =
             _ -> error "piss again"
         _ -> Nil
     
-evaluate (Unary Not op) = BoolVal $ not $ truth op
-evaluate (Unary operation op) =
+evaluate (Unary Not op _) = BoolVal $ not $ truth op
+evaluate (Unary operation op pos) =
     case (evaluate op) of
         (NumVal num) -> case operation of
             Neg -> NumVal (-num)
         _ -> Nil
 
-evaluate (Group expr) = evaluate(expr)
+evaluate (Group expr _) = evaluate(expr)
