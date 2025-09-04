@@ -1,47 +1,62 @@
 module Main (main) where
 
-import qualified LexerM as M
-import Operators(Expr)
+import LexerM
+import Operators
 import Check
---import PrintAst(printAst)
 import Parsle(parsle)
-import Evaluate(evaluate, Value(..))
-import System.IO(hFlush, stdout)
+import Interpreter
+import System.IO
+import Prelude hiding(lex)
+import Tok(Token)
+import Control.Monad.IO.Class(MonadIO(..))
+import System.Environment(getArgs)
+
 
 main :: IO ()
-main = lineLoop interpret
+main = do
+    args <- getArgs
+    case args of
+        [] -> run repl-- open repl
+        [fname] -> do 
+            handle <- openFile fname ReadMode -- open file and run through normally
+            code <- hGetContents handle
+            case lp code of
+                Error msg -> putStrLn msg
+                Checked pgrm -> run (interpret pgrm)
+        _ -> putStrLn "Usage: Lox <filename>"
 
-check :: String -> Check Expr
-check code = do
-    tokens <- M.lexes code
-    node <- parsle tokens
-    return node
 
-interpret :: String -> IO ()
-interpret code = putStrLn $ case check code of
-    Checked v -> show $ evaluate v
-    Error e -> e
+-- One do block carries the possibility of failure from lexes, parsing, and
+-- interpreting. Then another function takes that and handles (prints) the error.
 
 
--- hello i am corbin
-inputLoop :: (IO String) -> (String -> IO ()) -> IO ()
-inputLoop content process = do
+
+getCmnd :: IO String
+getCmnd = do
     putStr "> "
     hFlush stdout
-    input <- content
-    if null input
-        then return ()
+    getLine
+
+repl :: Interpreter()
+repl = do
+    line <- liftIO getCmnd
+    if line == "quit"
+        then return()
         else do
-            process input
-            inputLoop content process
+            case lp line of
+                Error msg -> liftIO (putStrLn msg)
+                Checked pgrm -> interpret pgrm
+            repl
 
-lineLoop :: (String -> IO ()) -> IO ()
-lineLoop = inputLoop getLine
+lp :: String -> Check String [Stmt]
+lp code = do
+    tokens <- lex code
+    parse tokens
 
-inputFile :: (String -> IO ()) -> IO ()
-inputFile process = do
-    contents <- getContents
-    process contents
+lex :: String -> Check String [Token]
+lex = lexes
 
--- interpret :: String -> Value
--- interpret = evaluate . parsle . lexes
+parse :: [Token] -> Check String [Stmt]
+parse = parsle
+
+-- hello i am corbin

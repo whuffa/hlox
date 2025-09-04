@@ -1,7 +1,7 @@
 {
 module Parsle (parsle) where
 import Prelude hiding (LT, GT, EQ, id)
-import Check
+import Check(Check(..))
 import Data.Char
 import Operators
 import Tok
@@ -11,9 +11,10 @@ import Tok
 %tokentype { Token }
 %error { parseError }
 
-%monad { Check } { >>= } { return }
+%monad { Check String } { >>= } { return }
 
 %token
+    ';'     { Token (Symbol ";") _ }
     '+'     { Token (Symbol "+") _ }
     '-'     { Token (Symbol "-") _ }
     '*'     { Token (Symbol "*") _ }
@@ -29,7 +30,12 @@ import Tok
     '<'     { Token (Symbol "<") _ }
     '('     { Token (Symbol "(") _ }
     ')'     { Token (Symbol ")") _ }
+    '='     { Token (Symbol "=") _ }
+    "print" { Token (TokenKeyword "print") _ }
+    "var"   { Token (TokenKeyword "var") _ }
     literal { Token (Lit _) _ }
+    ident   { Token (TokenIdent _) _ }
+
 
 %left "or"
 %left "and"
@@ -42,6 +48,15 @@ import Tok
 
 
 %%
+Prgm :: { [Stmt] }
+    : Stm ';' Prgm     { $1 : $3 }
+    | Stm ';'          { $1 : [] }
+
+Stm :: { Stmt }
+    : "print" Exp    { Print $2 (getPos $1)}
+    | "var" ident    { Declaration $2 Nothing (getPos $1) }
+    | "var" ident '=' Exp  { Declaration $2 (Just $4) (getPos $1) }
+    | Exp            { StmtExpr $1 }
 
 Exp :: { Expr }
     : Exp '+' Exp    { Binary Add $1 $3 (getPos $2) }
@@ -60,11 +75,12 @@ Exp :: { Expr }
     | Exp '>' Exp    { Binary GT $1 $3 (getPos $2) }
     | Exp '<' Exp    { Binary LT $1 $3 (getPos $2) }
     | literal        { let Token (Lit lit) pos = $1 in Litr lit pos }
+    | ident          { Identifier $1 }
 
 {
 
 
-parseError :: [Token] -> Check a
+parseError :: [Token] -> Check String a
 parseError [] = Error "Parse error: Unexpected end of input."
 parseError ((Token tt pos):_) = Error $ "Unexpected token: " ++ (show tt) ++ stringPos pos
 

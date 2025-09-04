@@ -1,4 +1,4 @@
-module Tok (Literal(..), Line, Token(..), TokenType(..), Pos(..), stringPos) where
+module Tok (Literal(..), Token(..), TokenType(..), Pos(..), stringPos) where
 
 data Literal = Number Double
              | Str String
@@ -12,15 +12,14 @@ data TokenType
     | TokenKeyword String 
     | TokenIdent String
     | EOF
-    deriving Show
+    deriving (Eq, Show)
 
-type Line = Int
 data Pos = Pos { getLine :: Int,
                  getColumn :: Int }
                  deriving(Show, Eq)
 data Token = Token { getType :: TokenType,
                      getPos :: Pos }
-                     deriving(Show)
+                     deriving(Show, Eq)
 
 stringPos :: Pos -> String
 stringPos (Pos x y) = "(Line " ++ (show x) ++ ", Col " ++ (show y)  ++ ")"

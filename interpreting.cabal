@@ -26,20 +26,26 @@ source-repository head
 library
   exposed-modules:
     Check
-    Evaluate
-    Lexer
+    Environment
+    Interpreter
     LexerM
     Lib
+    ListMap
     Operators
     Parsle
     PrintAst
     Tok
+    Value
+    Variable
   other-modules:
     Paths_interpreting
   autogen-modules:
     Paths_interpreting
   hs-source-dirs:
     src
+  default-extensions:
+    FlexibleInstances
+    MultiParamTypeClasses
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
     array,
@@ -51,20 +57,26 @@ executable interpreting-exe
   main-is: Main.hs
   other-modules:
     Check
-    Evaluate
-    Lexer
+    Environment
+    Interpreter
     LexerM
     Lib
+    ListMap
     Operators
     Parsle
     PrintAst
     Tok
+    Value
+    Variable
     Paths_interpreting
   autogen-modules:
     Paths_interpreting
   hs-source-dirs:
     app
     src
+  default-extensions:
+    FlexibleInstances
+    MultiParamTypeClasses
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
     array,
@@ -82,6 +94,9 @@ test-suite interpreting-test
     Paths_interpreting
   hs-source-dirs:
     test
+  default-extensions:
+    FlexibleInstances
+    MultiParamTypeClasses
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
     array,

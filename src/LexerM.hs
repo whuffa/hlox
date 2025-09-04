@@ -10,7 +10,7 @@ pass.
 -}
 
 import Prelude hiding (lex)
-import Check(Check(..))
+import Check
 import Data.Char(isSpace, isAlpha, isAlphaNum, isNumber)
 import Data.List(stripPrefix)
 import Tok(Literal(..), Token(..), TokenType(..), Pos(..), stringPos)
@@ -19,8 +19,9 @@ import Control.Monad.State
 --     getCode :: String,
 --     lexerPos :: Pos
 -- }
+type CheckStr = Check String
 type LexerState = (String, Pos)
-type Lexer a = StateT LexerState Check a
+type Lexer a = StateT LexerState CheckStr a
 
 symbols :: [String]
 symbols = [".", ",", "++", "+", "-", "*", "/", "(", ")", "{", "}", ";", "==", "=", "<=", ">=", "<", ">", "||", "&&", "!=",  "!"]
@@ -37,7 +38,7 @@ dictFind key ((k, v):ds)
     | key == k = Just v
     | otherwise = dictFind key ds
 
-lexes :: String -> Check [Token]
+lexes :: String -> Check String [Token]
 lexes code = do
     (tokens, _) <- runStateT lex $ (code, Pos 1 1)
     return tokens

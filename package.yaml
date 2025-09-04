@@ -24,6 +24,10 @@ dependencies:
 - base >= 4.7 && < 5
 - array
 
+default-extensions:
+  - FlexibleInstances
+  - MultiParamTypeClasses
+
 ghc-options:
 - -Wall
 - -Wcompat
@@ -50,6 +54,7 @@ executables:
     - -with-rtsopts=-N
     dependencies:
     - interpreting
+  
 
 tests:
   interpreting-test:
