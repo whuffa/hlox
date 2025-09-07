@@ -19,6 +19,7 @@ data Stmt
     = Print Expr Pos
     | StmtExpr Expr
     | Declaration Ident (Maybe Expr) Pos
+    | Block [Stmt] Pos
 
 data Expr
     = Litr Literal Pos

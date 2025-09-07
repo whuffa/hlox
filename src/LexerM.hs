@@ -15,6 +15,7 @@ import Data.Char(isSpace, isAlpha, isAlphaNum, isNumber)
 import Data.List(stripPrefix)
 import Tok(Literal(..), Token(..), TokenType(..), Pos(..), stringPos)
 import Control.Monad.State
+import Control.Monad.Error.Class (MonadError(throwError))
 -- data LexerState = LexerState {
 --     getCode :: String,
 --     lexerPos :: Pos
@@ -24,7 +25,7 @@ type LexerState = (String, Pos)
 type Lexer a = StateT LexerState CheckStr a
 
 symbols :: [String]
-symbols = [".", ",", "++", "+", "-", "*", "/", "(", ")", "{", "}", ";", "==", "=", "<=", ">=", "<", ">", "||", "&&", "!=",  "!"]
+symbols = [".", ",", "++", "+", "-", "/*", "*/", "*", "//", "/", "(", ")", "{", "}", ";", "==", "=", "<=", ">=", "<", ">", "||", "&&", "!=",  "!"]
 keywords :: [String]
 keywords = ["fun", "var", "if", "else", "class", "return", "for", "print", "super", "while", "this"]
 literals :: [(String, Literal)]
@@ -75,19 +76,30 @@ consume = do
             | c == '"' -> lexString
             | otherwise -> lexSymbol
 
+
+lexCommentLine :: Lexer Token
+lexCommentLine = do
+    _ <- lenSlice "//" "\n" False
+    consume
+
+lexCommentBlock :: Lexer Token
+lexCommentBlock = do
+    _ <- lenSlice "/*" "*/" True
+    consume
+
+
 lexWhitespace :: Lexer Token
 lexWhitespace = do
     (_str, pos) <- get
     case _str of
         [] -> consume
         c:cs -> do
-            let Pos ln cl = pos
-                (newLine, newCol) = if c == '\n'
-                    then (ln + 1, 1)
-                    else (ln, cl + 1)
-                newPos = Pos newLine newCol
-            put (cs, newPos)
+            put (cs, newlinePos pos c)
             consume
+
+newlinePos :: Pos -> Char -> Pos
+newlinePos (Pos ln _) '\n' = Pos (ln + 1) 1
+newlinePos (Pos ln cl) _ = Pos ln (cl + 1)
 
 lexAlpha :: Lexer Token
 lexAlpha = do
@@ -106,57 +118,101 @@ lexAlpha = do
 
 lexDouble :: Lexer Token
 lexDouble = do
-    (_str, pos) <- get
-    let (colOffset, rest, first) = lenSpan (\x -> isNumber x || x == '.' ) _str
-        newPos = addCols pos colOffset
+    first <- lenSpan (\x -> isNumber x || x == '.') False
+    (_, pos) <- get
     case (reads first :: [(Double, String)]) of
         (num, []):_ -> do
-            put (rest, newPos)
             let tt = Lit $ Number num
             return $ Token tt pos
         _ -> lift $ Error $ "Error lexing number: " ++ (show first) ++ stringPos pos
 
-lenSpan :: (a -> Bool) -> [a] -> (Int, [a], [a])
-lenSpan p zs = helper (0, zs, []) where
-    helper (count, [], xs) = (count, [], reverse xs)
-    helper (count, xs@(x:xs'), ys)
-        | p x = helper (count + 1, xs', x:ys)
-        | otherwise = (count, xs, reverse ys)
+--needs to be updated so that it increments cols?
+-- lenSpan :: (a -> Bool) -> [a] -> (Int, [a], [a])
+-- lenSpan p zs = helper (0, zs, []) where
+--     helper (count, [], xs) = (count, [], reverse xs)
+--     helper (count, xs@(x:xs'), ys)
+--         | p x = helper (count + 1, xs', x:ys)
+--         | otherwise = (count, xs, reverse ys)
+
+lenSpan :: (Char -> Bool) -> Bool -> Lexer String
+lenSpan p strict = do
+    (code, pos) <- get
+    helper pos [] code where
+        helper :: Pos -> String -> String -> Lexer String
+        helper _pos xs []
+            | strict = throwError $ "Expected closing condition to be met " ++ stringPos _pos
+            | otherwise = do
+                put ("", _pos)
+                return (reverse xs)
+        helper _pos xs (y:ys)
+            | p y = helper (newlinePos _pos y) (y:xs) ys
+            | y == '\n' = throwError $ "Unexpected end of line " ++ stringPos _pos
+            | otherwise = do
+                put (y:ys, _pos)
+                return (reverse xs)
+
+lenSlice :: [Char] -> [Char] -> Bool -> Lexer [Char]
+lenSlice key term strict = do
+    code <- checkPrefix key
+    (_, p) <- get
+    helper p [] code where
+        helper :: Pos -> [Char] -> [Char] -> Lexer [Char]
+        helper _pos xs []
+            | strict = throwError $ "Expected terminator \"" ++ (show term) ++ "\"" ++ stringPos _pos
+            | otherwise = do
+                put ("", _pos)
+                return (reverse xs)
+        helper _pos xs (y:ys) = case stripPrefix term (y:ys) of
+            Nothing -> helper (newlinePos _pos y) (y:xs) ys
+            Just rest -> do
+                put (rest, account _pos term)
+                return (reverse xs)
+
+account :: Pos -> String -> Pos
+account = foldl newlinePos
 
 
 lexSymbol :: Lexer Token
-lexSymbol = do
-    (_, _pos) <- get
-    tt <- symHelper symbols
-    return $ Token tt _pos
-    where
-        symHelper :: [String] -> Lexer TokenType
-        symHelper [] = do 
-            (_, pos) <- get
-            lift $ Error $ "Unrecognized symbol at " ++ stringPos pos
-        symHelper (s:ss) = do
-            (_str, pos) <- get
-            case (stripPrefix s _str) of
-                Nothing -> symHelper ss
-                Just rest -> do
-                    let colOffset = length s
-                        newPos = addCols pos colOffset
+lexSymbol = symHelper symbols where
+    symHelper :: [String] -> Lexer Token
+    symHelper [] = do 
+        (_, pos) <- get
+        lift $ Error $ "Unrecognized symbol at " ++ stringPos pos
+    symHelper (s:ss) = do
+        (_str, pos) <- get
+        case (stripPrefix s _str) of
+            Nothing -> symHelper ss
+            Just rest
+                | s == "//" -> lexCommentLine
+                | s == "/*" -> lexCommentBlock
+                | s == "*/" -> lift $ Error ("Unexpected end of comment block " ++ stringPos pos)
+                | otherwise -> do
+                    let newPos = account pos s
                     put (rest, newPos)
-                    return $ Symbol s
+                    return (Token (Symbol s) newPos)
+-- lexString :: Lexer Token
+-- lexString = do
+--     (_str, pos) <- get
+--     stripped <- checkPrefix "\""
+--     let (first, rest) = span (/= '\"') stripped
+--     case rest of
+--         '\"':cs -> do
+--             let colOffset = 1 + (length first) --length of quotes + string
+--                 newPos = addCols pos colOffset
+--             put (cs, newPos) 
+--             let tt = Lit $ Str first
+--             return $ Token tt pos
+--         _ -> do
+--             lift (Error ("Expected '\"' " ++ stringPos pos))
+
 lexString :: Lexer Token
 lexString = do
-    (_str, pos) <- get
-    stripped <- checkPrefix "\""
-    let (first, rest) = span (/= '\"') stripped
-    case rest of
-        '\"':cs -> do
-            let colOffset = 2 + (length first) --length of quotes + string
-                newPos = addCols pos colOffset
-            put (cs, newPos) 
-            let tt = Lit $ Str first
-            return $ Token tt pos
-        _ -> do
-            lift (Error ("Expected '\"' " ++ stringPos pos))
+    (_, pos) <- get
+    _ <- checkPrefix "\""
+    text <- lenSpan (/='\"') True
+    _ <- checkPrefix "\""
+    return $ Token (Lit $ Str text) pos
+
 
 checkPrefix :: String -> Lexer String
 checkPrefix pre = do
@@ -164,13 +220,8 @@ checkPrefix pre = do
     case (stripPrefix pre str) of
         Nothing -> lift $ Error $ "Expected '" ++ (show pre) ++ "' " ++ stringPos pos 
         Just stripped -> do
-            let colOffset = length pre
-                newPos = addCols pos colOffset
-            put (stripped, newPos)
+            put (stripped, account pos pre)
             return stripped
-
--- addLines :: Pos -> Int -> Pos
--- addLines (Pos x y) offset = Pos (x + offset) y
 
 addCols :: Pos -> Int -> Pos
 addCols (Pos x y) offset = Pos x (y + offset)

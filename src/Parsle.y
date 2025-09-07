@@ -31,6 +31,8 @@ import Tok
     '('     { Token (Symbol "(") _ }
     ')'     { Token (Symbol ")") _ }
     '='     { Token (Symbol "=") _ }
+    '{'     { Token (Symbol "{") _ }
+    '}'     { Token (Symbol "}") _ }
     "print" { Token (TokenKeyword "print") _ }
     "var"   { Token (TokenKeyword "var") _ }
     literal { Token (Lit _) _ }
@@ -57,6 +59,7 @@ Stm :: { Stmt }
     | "var" ident    { Declaration $2 Nothing (getPos $1) }
     | "var" ident '=' Exp  { Declaration $2 (Just $4) (getPos $1) }
     | Exp            { StmtExpr $1 }
+    | '{' Prgm '}'  { Block $2 (getPos $1) }
 
 Exp :: { Expr }
     : Exp '+' Exp    { Binary Add $1 $3 (getPos $2) }

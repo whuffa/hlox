@@ -1,3 +1,9 @@
-var impostor = "red";
+// HAHA YOU CAN'T SEE ME
+print "But you can see me!";
+/*
 
-print "The impostor is " + impostor + "!!!";
+
+
+but what about me
+
+*/

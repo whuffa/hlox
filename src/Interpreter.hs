@@ -71,6 +71,11 @@ execute (Declaration (Token (TokenIdent ident) tpos) initial pos) = do
             value <- evaluate expr
             define env ident value
 execute (Declaration _ _ _)  = throwError "Something went wrong parsing!"
+execute (Block stmts _) = do
+    env <- getEnv
+    putEnv initialEnv
+    executeProgram stmts
+    putEnv env
 
 assign :: String -> Value -> Interpreter ()
 assign ident value = do
@@ -157,6 +162,7 @@ evaluate (Assign (Token (TokenIdent ident) _) expr pos) = do
     v <- evaluate expr
     assign ident v
     return v
+evaluate (Assign (Token _ _) _ pos) = throwError $ "Something went wrong while parsing " ++ stringPos pos
 evaluate (Identifier (Token (TokenIdent ident) tpos)) = do
     env <- getEnv
     case lookup env ident of
@@ -207,6 +213,8 @@ x %>= y = do
 
 (%+) :: BinFunc Value
 (NumVal x) %+ (NumVal y) = return $ NumVal (x + y)
+(NumVal x) %+ (StringVal y) = return $ StringVal $ show x ++ y
+(StringVal x) %+ (NumVal y) = return $ StringVal $ x ++ (show y)
 (StringVal x) %+ (StringVal y) = return $ StringVal (x ++ y)
 x %+ y = throwError $ binErrStr x y "+"
 

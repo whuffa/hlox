@@ -1,3 +1,4 @@
+{-# LANGUAGE InstanceSigs #-}
 module Tok (Literal(..), Token(..), TokenType(..), Pos(..), stringPos) where
 
 data Literal = Number Double
@@ -17,6 +18,13 @@ data TokenType
 data Pos = Pos { getLine :: Int,
                  getColumn :: Int }
                  deriving(Show, Eq)
+
+instance Semigroup Pos where
+    (<>) :: Pos -> Pos -> Pos
+    (Pos x1 y1) <> (Pos x2 y2) = Pos (x1 + x2) (y1 + y2)
+instance Monoid Pos where
+    mempty :: Pos
+    mempty = Pos 0 0
 data Token = Token { getType :: TokenType,
                      getPos :: Pos }
                      deriving(Show, Eq)
