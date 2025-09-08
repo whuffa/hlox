@@ -25,6 +25,9 @@ type UnaFunc a = Value -> Interpreter a
 initialEnv :: Environment String Value
 initialEnv = Environment [] Nothing
 
+childEnv :: EnvrState -> EnvrState
+childEnv = Environment [] . Just
+
 getEnv :: Interpreter (Environment String Value)
 getEnv = do
     s <- get
@@ -45,6 +48,17 @@ run interpreter = do
 
 interpret :: [Stmt] -> Interpreter ()
 interpret = executeProgram
+
+executeBlock :: [Stmt] -> EnvrState -> Interpreter ()
+executeBlock stmts env = do
+    putEnv env
+    executeProgram stmts
+    Environment _ p <- getEnv
+    case p of
+        Just _p -> putEnv _p
+        Nothing -> throwError $ "Something went wrong recursing out of a block environment."
+
+
 
 executeProgram :: [Stmt] -> Interpreter ()
 executeProgram [] = return ()
@@ -73,9 +87,23 @@ execute (Declaration (Token (TokenIdent ident) tpos) initial pos) = do
 execute (Declaration _ _ _)  = throwError "Something went wrong parsing!"
 execute (Block stmts _) = do
     env <- getEnv
-    putEnv initialEnv
-    executeProgram stmts
-    putEnv env
+    executeBlock stmts (childEnv env)
+execute (IfElse condition _if m_else _) = do
+    ex <- truth condition
+    if ex
+        then execute _if
+        else case m_else of
+            Nothing -> return()
+            (Just _else) -> execute _else
+execute (While condition stmt _) = helper where
+    helper = do
+        ex <- truth condition
+        if ex
+            then do 
+                execute stmt
+                helper
+            else return ()
+execute (Break pos) = throwError $ "Break statement not yet implemented " ++ stringPos pos
 
 assign :: String -> Value -> Interpreter ()
 assign ident value = do
@@ -96,7 +124,9 @@ define env key val = let
     helper :: Maybe EnvrState -> Interpreter (EnvrState)
     helper Nothing = throwError "Cannot define undeclared variable."
     helper (Just (Environment lmap p)) = case find lmap key of
-        Undeclared -> helper p
+        Undeclared -> do
+            _p <- helper p
+            return (Environment lmap (Just _p))
         _ -> return (Environment nmap p) where
             nmap = insert lmap assoc
     in helper (Just env)

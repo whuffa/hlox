@@ -1,9 +1,9 @@
-// HAHA YOU CAN'T SEE ME
-print "But you can see me!";
-/*
+for (var i = 0; i < 3; i = i + 1) {
+    print i;
+}
 
+var i = 0;
 
-
-but what about me
-
-*/
+for (; i < 6; i = i + 2) {
+    print i;
+}

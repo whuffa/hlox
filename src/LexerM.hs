@@ -27,7 +27,7 @@ type Lexer a = StateT LexerState CheckStr a
 symbols :: [String]
 symbols = [".", ",", "++", "+", "-", "/*", "*/", "*", "//", "/", "(", ")", "{", "}", ";", "==", "=", "<=", ">=", "<", ">", "||", "&&", "!=",  "!"]
 keywords :: [String]
-keywords = ["fun", "var", "if", "else", "class", "return", "for", "print", "super", "while", "this"]
+keywords = ["fun", "var", "if", "else", "class", "return", "for", "break", "print", "super", "while", "this"]
 literals :: [(String, Literal)]
 literals = [("true", LBool True), 
             ("false", LBool False),

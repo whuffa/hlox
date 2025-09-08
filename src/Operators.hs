@@ -20,6 +20,9 @@ data Stmt
     | StmtExpr Expr
     | Declaration Ident (Maybe Expr) Pos
     | Block [Stmt] Pos
+    | IfElse Expr Stmt (Maybe Stmt) Pos
+    | While Expr Stmt Pos
+    | Break Pos
 
 data Expr
     = Litr Literal Pos

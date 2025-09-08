@@ -33,8 +33,14 @@ import Tok
     '='     { Token (Symbol "=") _ }
     '{'     { Token (Symbol "{") _ }
     '}'     { Token (Symbol "}") _ }
+    ','     { Token (Symbol ",") _ }
     "print" { Token (TokenKeyword "print") _ }
     "var"   { Token (TokenKeyword "var") _ }
+    "if"    { Token (TokenKeyword "if") _ }
+    "else"  { Token (TokenKeyword "else") _ }
+    "while" { Token (TokenKeyword "while") _ }
+    "for"   { Token (TokenKeyword "for") _ }
+    "break" { Token (TokenKeyword "break") _ }
     literal { Token (Lit _) _ }
     ident   { Token (TokenIdent _) _ }
 
@@ -51,15 +57,32 @@ import Tok
 
 %%
 Prgm :: { [Stmt] }
-    : Stm ';' Prgm     { $1 : $3 }
-    | Stm ';'          { $1 : [] }
+    : Stm Prgm     { $1 : $2 }
+    | Stm          { $1 : [] }
 
 Stm :: { Stmt }
-    : "print" Exp    { Print $2 (getPos $1)}
-    | "var" ident    { Declaration $2 Nothing (getPos $1) }
-    | "var" ident '=' Exp  { Declaration $2 (Just $4) (getPos $1) }
-    | Exp            { StmtExpr $1 }
-    | '{' Prgm '}'  { Block $2 (getPos $1) }
+    : "print" Exp ';'   { Print $2 (getPos $1)}
+    | "var" ident ';'   { Declaration $2 Nothing (getPos $1) }
+    | "var" ident '=' Exp ';' { Declaration $2 (Just $4) (getPos $1) }
+    | Exp ';'           { StmtExpr $1 }
+    | '{' Prgm '}'      { Block $2 (getPos $1) }
+    | "if" '(' Exp ')' Stm    { IfElse $3 $5 Nothing (getPos $1) }
+    | "if" '(' Exp ')' Stm "else" Stm { IfElse $3 $5 (Just $7) (getPos $1)}
+    | "while" '(' Exp ')' Stm         { While $3 $5 (getPos $1)}
+    | "for" '(' OptInit OptCond OptIter ')' Stm { createForLoop $3 $4 $5 $7 (getPos $1) }
+    | "break" { Break (getPos $1) }
+
+OptInit :: { [Stmt] }
+        : Stm { [$1] }
+        | ';' { []   }
+
+OptCond :: { Expr }
+        : Exp ';' { $1 }
+        | ';'     { Litr (LBool True) (getPos $1) }
+
+OptIter :: { [Stmt] }
+        : Exp { [StmtExpr $1] }
+        |     { [] }
 
 Exp :: { Expr }
     : Exp '+' Exp    { Binary Add $1 $3 (getPos $2) }
@@ -79,9 +102,15 @@ Exp :: { Expr }
     | Exp '<' Exp    { Binary LT $1 $3 (getPos $2) }
     | literal        { let Token (Lit lit) pos = $1 in Litr lit pos }
     | ident          { Identifier $1 }
+    | ident '=' Exp  { Assign $1 $3 (getPos $2) }
 
 {
 
+createForLoop :: [Stmt] -> Expr -> [Stmt] -> Stmt -> Pos -> Stmt
+createForLoop initial condition increment body pos = Block outerBlock pos where
+    innerBlock = Block (body:increment) pos
+    whileBlock = While condition innerBlock pos
+    outerBlock = initial ++ [whileBlock]
 
 parseError :: [Token] -> Check String a
 parseError [] = Error "Parse error: Unexpected end of input."
