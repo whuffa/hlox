@@ -70,7 +70,7 @@ Stm :: { Stmt }
     | "if" '(' Exp ')' Stm "else" Stm { IfElse $3 $5 (Just $7) (getPos $1)}
     | "while" '(' Exp ')' Stm         { While $3 $5 (getPos $1)}
     | "for" '(' OptInit OptCond OptIter ')' Stm { createForLoop $3 $4 $5 $7 (getPos $1) }
-    | "break" { Break (getPos $1) }
+    | "break" ';' { Break (getPos $1) }
 
 OptInit :: { [Stmt] }
         : Stm { [$1] }

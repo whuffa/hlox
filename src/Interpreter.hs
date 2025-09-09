@@ -15,7 +15,13 @@ import ListMap
 data InterpreterState = InterpreterState {stateEnv :: EnvrState}
 type EnvrState = Environment String Value
 
-type Interpreter a = StateT InterpreterState (CheckT String IO) a
+data Control e
+    = CtrlBreak
+    | RuntimeError e
+    deriving(Show)
+
+type GenInterpreter e a = CheckT (Control e) (StateT InterpreterState IO) a
+type Interpreter a = GenInterpreter String a
 --type ExceptIO = ExceptT Error IO
 type BinFunc a = Value -> Value -> Interpreter a
 type UnaFunc a = Value -> Interpreter a
@@ -38,12 +44,29 @@ putEnv env = do
     s <- get
     put (s {stateEnv = env})
 
+-- piss :: Interpreter () -> Check (Control String) ()
+-- piss interpreter = runCheckT interpreter
+
+piss3 :: Interpreter () -> IO()
+piss3 interpreter = let intr = runCheckT interpreter 
+                        other = runStateT intr 
+                        newres = other (InterpreterState initialEnv ) in
+    do
+        (res, _) <- newres
+        case res of
+            Error c -> case c of
+                RuntimeError e -> putStrLn e
+                o -> putStrLn $ "Probably should have caught " ++ (show o ) ++ " earlier, huh? Look what you fucking did. You buffoon."
+            Checked _ -> return ()
+
 run :: Interpreter () -> IO ()
-run interpreter = do
-    result <- runCheckT $ fmap fst $ runStateT interpreter (InterpreterState initialEnv)
-    case result of
-        Error msg -> putStrLn msg
-        Checked _ -> return()
+run intr = do
+    (res, _) <- (runStateT $ runCheckT intr) (InterpreterState initialEnv)
+    case res of
+        Error c -> case c of
+            RuntimeError e -> putStrLn e
+            o -> putStrLn $ "Probably should have caught " ++ (show o ) ++ " earlier, huh? Look what you fucking did. You buffoon."
+        Checked _ -> return ()
 
 
 interpret :: [Stmt] -> Interpreter ()
@@ -56,7 +79,7 @@ executeBlock stmts env = do
     Environment _ p <- getEnv
     case p of
         Just _p -> putEnv _p
-        Nothing -> throwError $ "Something went wrong recursing out of a block environment."
+        Nothing -> throwRuntimeErr ("Something went wrong recursing out of a block environment.")
 
 
 
@@ -84,7 +107,7 @@ execute (Declaration (Token (TokenIdent ident) tpos) initial pos) = do
         helper env (Just expr) = do
             value <- evaluate expr
             define env ident value
-execute (Declaration _ _ _)  = throwError "Something went wrong parsing!"
+execute (Declaration _ _ _)  = throwRuntimeErr "Something went wrong parsing!"
 execute (Block stmts _) = do
     env <- getEnv
     executeBlock stmts (childEnv env)
@@ -100,10 +123,10 @@ execute (While condition stmt _) = helper where
         ex <- truth condition
         if ex
             then do 
-                execute stmt
-                helper
+                brk <- catchBreak (execute stmt)
+                if brk then return() else helper
             else return ()
-execute (Break pos) = throwError $ "Break statement not yet implemented " ++ stringPos pos
+execute (Break _) = throwError CtrlBreak
 
 assign :: String -> Value -> Interpreter ()
 assign ident value = do
@@ -115,14 +138,14 @@ declare :: EnvrState -> String -> Interpreter (EnvrState)
 declare (Environment lmap p) k = case find lmap k of
     Undeclared -> return (Environment nmap p) where
         nmap = insert lmap (k, Nothing)
-    _ -> throwError "Variable already declared in this scope."
+    _ -> throwRuntimeErr $ "Variable already declared in this scope."
 
 
 define :: EnvrState -> String -> Value -> Interpreter (EnvrState)
 define env key val = let
     assoc = (key, Just val)
     helper :: Maybe EnvrState -> Interpreter (EnvrState)
-    helper Nothing = throwError "Cannot define undeclared variable."
+    helper Nothing = throwRuntimeErr "Cannot define undeclared variable."
     helper (Just (Environment lmap p)) = case find lmap key of
         Undeclared -> do
             _p <- helper p
@@ -167,7 +190,7 @@ evaluate (Binary And op1 op2 _) = do
 evaluate (Binary operator op1 op2 pos) = do
     l <- evaluate op1
     r <- evaluate op2
-    l `op` r `catchError` c where
+    l `op` r `catchRuntimeErr` c where
         op = case operator of
             Add -> (%+)
             Sub -> (%-)
@@ -179,36 +202,54 @@ evaluate (Binary operator op1 op2 pos) = do
             GE -> (%>=)
             EQ -> (%==)
             NE -> (%/=)
-        c = \e -> throwError (e ++ stringPos pos)
+        c = \e -> throwRuntimeErr (e ++ stringPos pos)
 evaluate (Unary operator op1 pos) = do
     r <- evaluate op1
-    op r `catchError` c where
+    op r `catchRuntimeErr` c where
         op = case operator of
             Neg -> neg
             Not -> (%!)
-        c = (\e -> throwError $ e ++ stringPos pos)
-evaluate (Group expr pos) = evaluate expr
+        c = (\e -> throwRuntimeErr $ e ++ stringPos pos)
+evaluate (Group expr _) = evaluate expr
 evaluate (Assign (Token (TokenIdent ident) _) expr pos) = do
     v <- evaluate expr
     assign ident v
     return v
-evaluate (Assign (Token _ _) _ pos) = throwError $ "Something went wrong while parsing " ++ stringPos pos
+evaluate (Assign (Token _ _) _ pos) = throwRuntimeErr $ "Something went wrong while parsing " ++ stringPos pos
 evaluate (Identifier (Token (TokenIdent ident) tpos)) = do
     env <- getEnv
     case lookup env ident of
         Defined v -> return v
         Declared -> return Nil
-        Undeclared -> throwError $ "Undeclared variable \"" ++ ident ++ "\" at " ++ stringPos tpos
-evaluate (Identifier (Token _ tpos)) = throwError $ "Wrong token in Identifier parse node!" ++ (stringPos tpos)
+        Undeclared -> throwRuntimeErr $ "Undeclared variable \"" ++ ident ++ "\" at " ++ stringPos tpos
+evaluate (Identifier (Token _ tpos)) = throwRuntimeErr $ "Wrong token in Identifier parse node!" ++ (stringPos tpos)
 
+catchRuntimeErr :: GenInterpreter e a -> (e -> GenInterpreter e a) -> GenInterpreter e a
+(CheckT ma) `catchRuntimeErr` handler = CheckT $ do
+    a <- ma
+    case a of
+        Checked x -> return (Checked x)
+        Error y -> case y of
+            RuntimeError e -> runCheckT (handler e)
+            z -> return (Error z)
 
+-- GenInterpreter e a = CheckT (Control e) (StateT InterpreterState IO) a
 
+catchBreak :: GenInterpreter e () -> GenInterpreter e Bool
+catchBreak (CheckT ma) = CheckT $ do
+    a <- ma
+    case a of
+        Checked _ -> return (Checked False)
+        Error CtrlBreak -> do
+            return (Checked True)
+        Error (RuntimeError e) -> return $ Error (RuntimeError e)
+        
 
 (%==) :: BinFunc Value
 (NumVal x) %== (NumVal y) = return $ BoolVal (x == y)
 (StringVal x) %== (StringVal y) = return $ BoolVal (x == y)
 (BoolVal x) %== (BoolVal y) = return $ BoolVal (x == y)
-x %== y = lift $ throwError $ binErrStr x y "=="
+x %== y = throwRuntimeErr $ binErrStr x y "=="
 
 -- (%/=) :: BinFunc Value
 -- (NumVal x) %/= (NumVal y) = return $ BoolVal (x /= y)
@@ -219,53 +260,56 @@ x %== y = lift $ throwError $ binErrStr x y "=="
 (%/=) :: BinFunc Value
 x %/= y = do
     z <- x %== y
-    (%!) z `catchError` (\_ -> throwError $ binErrStr x y "!=")
+    (%!) z `catchRuntimeErr` (\_ -> throwRuntimeErr $ binErrStr x y "!=")
 
 (%<) :: BinFunc Value
 (NumVal x) %< (NumVal y) = return $ BoolVal (x < y)
-x %< y = throwError (binErrStr x y "<")
+x %< y = throwRuntimeErr (binErrStr x y "<")
 
 (%>) :: BinFunc Value
 (NumVal x) %> (NumVal y) = return $ BoolVal (x > y)
-x %> y = throwError (binErrStr x y ">")
+x %> y = throwRuntimeErr (binErrStr x y ">")
 
 (%<=) :: BinFunc Value
 x %<= y = do
     z <- x %> y
     (%!) z
-    `catchError` (\_ -> throwError $ binErrStr x y "<=")
+    `catchError` (\_ -> throwRuntimeErr $ binErrStr x y "<=")
 
 (%>=) :: BinFunc Value
 x %>= y = do
     z <- x %< y
     (%!) z
-    `catchError` (\_ -> throwError $ binErrStr x y ">=")
+    `catchError` (\_ -> throwRuntimeErr $ binErrStr x y ">=")
 
 (%+) :: BinFunc Value
 (NumVal x) %+ (NumVal y) = return $ NumVal (x + y)
 (NumVal x) %+ (StringVal y) = return $ StringVal $ show x ++ y
 (StringVal x) %+ (NumVal y) = return $ StringVal $ x ++ (show y)
 (StringVal x) %+ (StringVal y) = return $ StringVal (x ++ y)
-x %+ y = throwError $ binErrStr x y "+"
+x %+ y = throwRuntimeErr $ binErrStr x y "+"
 
 (%-) :: BinFunc Value
 (NumVal x) %- (NumVal y) = return $ NumVal (x - y)
-x %- y = throwError $ binErrStr x y "-"
+x %- y = throwRuntimeErr $ binErrStr x y "-"
 
 (%*) :: BinFunc Value
 (NumVal x) %* (NumVal y) = return $ NumVal (x * y)
-x %* y = throwError $ binErrStr x y "*"
+x %* y = throwRuntimeErr $ binErrStr x y "*"
 
 (%/) :: BinFunc Value
 (NumVal x) %/ (NumVal y) = return $ NumVal (x / y)
-x %/ y = throwError $ binErrStr x y "/"
+x %/ y = throwRuntimeErr $ binErrStr x y "/"
 
 (%!) :: UnaFunc Value
 (%!) x = let b = truthiness x in return $ BoolVal (not b)
 
 neg :: UnaFunc Value
 neg (NumVal x) = return $ NumVal (-x)
-neg y = throwError $ unaErrStr y "-"
+neg y = throwRuntimeErr $ unaErrStr y "-"
+
+throwRuntimeErr :: String -> Interpreter a
+throwRuntimeErr = throwError . RuntimeError
 
 binErrStr :: Value -> Value -> String -> String
 binErrStr x y op = 

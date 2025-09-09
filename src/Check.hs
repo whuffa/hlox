@@ -1,9 +1,12 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE UndecidableInstances #-}
 module Check(Check(..), CheckT(..), throwWarning) where
 import Control.Monad.Except (MonadError(..))
 import Control.Monad.IO.Class(MonadIO(..))
+import Control.Monad.State.Class(MonadState(..))
+import Control.Monad.Trans(MonadTrans(lift))
 
 data Check e a
     = Checked a
@@ -59,12 +62,24 @@ instance (Monad m) => MonadError e (CheckT e m) where
         case a of 
             Error e -> runCheckT (handler e)
             Checked x -> return (Checked x)
+            
 
 instance (MonadIO m) => MonadIO (CheckT e m) where
     liftIO :: IO a -> CheckT e m a
     liftIO io = CheckT $ do
         x <- liftIO io
         return (Checked x)
+
+instance MonadTrans (CheckT e) where
+    lift :: Monad m => m a -> CheckT e m a
+    lift ma = CheckT $ (Checked <$> ma)
+
+
+instance MonadState s m => MonadState s (CheckT e m) where
+    get :: CheckT e m s
+    get = lift get
+    put :: s -> CheckT e m ()
+    put s = lift (put s)
 
 throwWarning :: String -> CheckT e IO ()
 throwWarning = liftIO . putStrLn
