@@ -1,10 +1,14 @@
-module Operators (BinaryOp(..), UnaryOp(..), Expr(..), Stmt(..), Prgm) where
+module Operators (BinaryOp(..), UnaryOp(..), Expr(..), Stmt(..), Prgm, Ident(..)) where
 
 import Prelude hiding (EQ)
 import Tok
 
-type Ident = Token
 
+data Ident = Ident { getName :: String,
+                     getDepth :: Int,
+                     getIPos :: Pos }
+                     deriving (Show, Eq)
+                     
 data BinaryOp = Add | Sub | Mul | Div |
                 And | Or | GT | LT | LE |
                 GE | EQ | NE
@@ -18,11 +22,13 @@ data UnaryOp = Neg | Not
 data Stmt
     = Print Expr Pos
     | StmtExpr Expr
-    | Declaration Ident (Maybe Expr) Pos
+    | Declaration Ident Expr Pos
     | Block [Stmt] Pos
     | IfElse Expr Stmt (Maybe Stmt) Pos
     | While Expr Stmt Pos
     | Break Pos
+    | Return Expr Pos
+    deriving (Eq, Show)
 
 data Expr
     = Litr Literal Pos
@@ -31,6 +37,10 @@ data Expr
     | Assign Ident Expr Pos
     | Group Expr Pos
     | Identifier Ident
+    | Call Expr [Expr] Pos
+    | Lambda [Ident] [Ident] [Stmt] Pos
     deriving (Eq, Show)
+
+
 
 type Prgm = [Stmt]

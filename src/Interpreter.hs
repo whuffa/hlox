@@ -1,22 +1,55 @@
+{-# LANGUAGE InstanceSigs #-}
 module Interpreter(run, interpret, Interpreter) where
 
-import Prelude hiding (EQ, GT, LT, lookup)
+import Prelude hiding (EQ, GT, LT)
 import Control.Monad.State
 import Control.Monad.Except
 import Control.Monad.IO.Class()
 import Check
-import Tok
+import Tok(Literal(..))
 import Operators
-import Environment hiding(declare, define)
-import Value(Value(..), stringifyVal)
-import Variable
-import ListMap
+import Environment
+import Data.IORef
+import Data.List(stripPrefix)
 
-data InterpreterState = InterpreterState {stateEnv :: EnvrState}
+data Function = Function { getClosure :: EnvrState,
+                           getIdents :: [Ident],
+                           getStmts :: [Stmt] }
+
+data Value
+    = BoolVal Bool
+    | NumVal Double
+    | StringVal String
+    | LambdaVal Function
+    | Nil
+
+instance Show Value where
+    show :: Value -> String
+    show (BoolVal v) = show v
+    show (NumVal d) = case stripSuffix ".0" (show d) of
+        Just trim -> trim
+        Nothing -> (show d)
+    show (StringVal str) = str
+    show (LambdaVal _) = "Please don't try and show functions :)"
+    show Nil = "nil"
+
+class HasType a where
+    vType :: a -> String
+
+instance HasType Value where
+    vType :: Value -> String
+    vType (BoolVal _) = "Boolean"
+    vType (NumVal _) = "Number"
+    vType (StringVal _) = "String"
+    vType (LambdaVal _) = "Function"
+    vType Nil = "Nil"
+
+data InterpreterState = InterpreterState {envStack :: [EnvrState]}
+type Cell = IORef Value
 type EnvrState = Environment String Value
-
 data Control e
     = CtrlBreak
+    | CtrlReturn Value
     | RuntimeError e
     deriving(Show)
 
@@ -28,40 +61,50 @@ type UnaFunc a = Value -> Interpreter a
 
 
 
-initialEnv :: Environment String Value
-initialEnv = Environment [] Nothing
+initialEnv :: EnvrState
+initialEnv = Environment []
 
-childEnv :: EnvrState -> EnvrState
-childEnv = Environment [] . Just
+initialEnvStack :: [EnvrState]
+initialEnvStack = [initialEnv]
 
-getEnv :: Interpreter (Environment String Value)
-getEnv = do
+-- childEnv :: EnvrState -> EnvrState
+-- childEnv = Environment [] . Just
+
+pushEnv :: EnvrState -> Interpreter ()
+pushEnv env = do
+    envs <- getEnvStack
+    putEnvStack (env:envs)
+
+popEnv :: Interpreter EnvrState
+popEnv = do
+    envs <- getEnvStack
+    case envs of
+        [] -> throwRuntimeErr $ "Tried to pop environment while stack is empty."
+        e:es -> do
+            putEnvStack es
+            return e
+
+beginEnv :: Interpreter ()
+beginEnv = pushEnv (Environment [])
+
+endEnv :: Interpreter ()
+endEnv = do
+    _ <- popEnv
+    return ()
+
+getEnvStack :: Interpreter [EnvrState]
+getEnvStack = do
     s <- get
-    return (stateEnv s)
+    return (envStack s)
 
-putEnv :: Environment String Value -> Interpreter ()
-putEnv env = do
+putEnvStack :: [EnvrState] -> Interpreter ()
+putEnvStack env = do
     s <- get
-    put (s {stateEnv = env})
-
--- piss :: Interpreter () -> Check (Control String) ()
--- piss interpreter = runCheckT interpreter
-
-piss3 :: Interpreter () -> IO()
-piss3 interpreter = let intr = runCheckT interpreter 
-                        other = runStateT intr 
-                        newres = other (InterpreterState initialEnv ) in
-    do
-        (res, _) <- newres
-        case res of
-            Error c -> case c of
-                RuntimeError e -> putStrLn e
-                o -> putStrLn $ "Probably should have caught " ++ (show o ) ++ " earlier, huh? Look what you fucking did. You buffoon."
-            Checked _ -> return ()
+    put (s {envStack = env})
 
 run :: Interpreter () -> IO ()
 run intr = do
-    (res, _) <- (runStateT $ runCheckT intr) (InterpreterState initialEnv)
+    (res, _) <- (runStateT $ runCheckT intr) (InterpreterState initialEnvStack)
     case res of
         Error c -> case c of
             RuntimeError e -> putStrLn e
@@ -72,45 +115,27 @@ run intr = do
 interpret :: [Stmt] -> Interpreter ()
 interpret = executeProgram
 
-executeBlock :: [Stmt] -> EnvrState -> Interpreter ()
-executeBlock stmts env = do
-    putEnv env
-    executeProgram stmts
-    Environment _ p <- getEnv
-    case p of
-        Just _p -> putEnv _p
-        Nothing -> throwRuntimeErr ("Something went wrong recursing out of a block environment.")
-
-
-
 executeProgram :: [Stmt] -> Interpreter ()
-executeProgram [] = return ()
-executeProgram (s:ss) = do
-    execute s
-    executeProgram ss
+executeProgram stmts = do
+    _ <- mapM execute stmts
+    return ()
 
 execute :: Stmt -> Interpreter ()
-execute (Print expr pos) = do
+execute (Print expr _) = do
     value <- evaluate expr
-    liftIO $ putStrLn (stringifyVal value)
+    liftIO $ putStrLn (show value)
 execute (StmtExpr expr) = do
     _ <- evaluate expr
     return ()
-execute (Declaration (Token (TokenIdent ident) tpos) initial pos) = do
-    env <- getEnv
-    newEnv <- declare env ident
-    newerEnv <- helper newEnv initial
-    putEnv newerEnv
-    where
-        helper :: EnvrState -> Maybe Expr -> Interpreter EnvrState
-        helper env Nothing = return env
-        helper env (Just expr) = do
-            value <- evaluate expr
-            define env ident value
-execute (Declaration _ _ _)  = throwRuntimeErr "Something went wrong parsing!"
+execute (Declaration ident initial _) = do
+    mVal <- evaluate initial
+    newRef <- liftIO $ newIORef mVal
+    top <- popEnv
+    pushEnv (insertRef top (getName ident, newRef)) 
 execute (Block stmts _) = do
-    env <- getEnv
-    executeBlock stmts (childEnv env)
+    beginEnv
+    executeProgram stmts
+    endEnv
 execute (IfElse condition _if m_else _) = do
     ex <- truth condition
     if ex
@@ -127,32 +152,9 @@ execute (While condition stmt _) = helper where
                 if brk then return() else helper
             else return ()
 execute (Break _) = throwError CtrlBreak
-
-assign :: String -> Value -> Interpreter ()
-assign ident value = do
-    env <- getEnv
-    newEnv <- define env ident value
-    putEnv newEnv
-    
-declare :: EnvrState -> String -> Interpreter (EnvrState)
-declare (Environment lmap p) k = case find lmap k of
-    Undeclared -> return (Environment nmap p) where
-        nmap = insert lmap (k, Nothing)
-    _ -> throwRuntimeErr $ "Variable already declared in this scope."
-
-
-define :: EnvrState -> String -> Value -> Interpreter (EnvrState)
-define env key val = let
-    assoc = (key, Just val)
-    helper :: Maybe EnvrState -> Interpreter (EnvrState)
-    helper Nothing = throwRuntimeErr "Cannot define undeclared variable."
-    helper (Just (Environment lmap p)) = case find lmap key of
-        Undeclared -> do
-            _p <- helper p
-            return (Environment lmap (Just _p))
-        _ -> return (Environment nmap p) where
-            nmap = insert lmap assoc
-    in helper (Just env)
+execute (Return expr _) = do
+    val <- evaluate expr
+    throwError (CtrlReturn val)
 
 truthiness :: Value -> Bool
 truthiness (NumVal 0) = False
@@ -202,27 +204,77 @@ evaluate (Binary operator op1 op2 pos) = do
             GE -> (%>=)
             EQ -> (%==)
             NE -> (%/=)
-        c = \e -> throwRuntimeErr (e ++ stringPos pos)
+        c = \e -> throwRuntimeErr (e ++ show pos)
 evaluate (Unary operator op1 pos) = do
     r <- evaluate op1
     op r `catchRuntimeErr` c where
         op = case operator of
             Neg -> neg
             Not -> (%!)
-        c = (\e -> throwRuntimeErr $ e ++ stringPos pos)
+        c = (\e -> throwRuntimeErr $ e ++ show pos)
 evaluate (Group expr _) = evaluate expr
-evaluate (Assign (Token (TokenIdent ident) _) expr pos) = do
+evaluate (Assign ident expr _) = do
     v <- evaluate expr
-    assign ident v
+    ref <- envLookup ident
+    liftIO $ writeIORef ref v
     return v
-evaluate (Assign (Token _ _) _ pos) = throwRuntimeErr $ "Something went wrong while parsing " ++ stringPos pos
-evaluate (Identifier (Token (TokenIdent ident) tpos)) = do
-    env <- getEnv
-    case lookup env ident of
-        Defined v -> return v
-        Declared -> return Nil
-        Undeclared -> throwRuntimeErr $ "Undeclared variable \"" ++ ident ++ "\" at " ++ stringPos tpos
-evaluate (Identifier (Token _ tpos)) = throwRuntimeErr $ "Wrong token in Identifier parse node!" ++ (stringPos tpos)
+evaluate (Identifier ident) = do
+    ref <- envLookup ident
+    liftIO $ readIORef ref
+evaluate (Lambda nonlocals params stmts _) = do
+    beginEnv
+    refs <- mapM envLookup nonlocals
+    endEnv
+    let names = map getName nonlocals
+        closure = Environment (zip names refs)
+    (return . LambdaVal) (Function closure params stmts)
+evaluate (Call expr argExprs pos) = do
+    callee <- evaluate expr
+    case callee of
+        LambdaVal (Function closure params body) -> do
+            args <- mapM evaluate argExprs
+            newRefs <- liftIO $ mapM newIORef args
+            locals <- zipParams params newRefs `catchRuntimeErr` (\e -> throwRuntimeErr $ e ++ " " ++ show pos)
+            curStack <- getEnvStack
+            putEnvStack (locals:closure:[])
+            returnVal <- catchReturn (executeProgram body)
+            putEnvStack curStack
+            return returnVal
+        val -> throwRuntimeErr $ "Tried to call noncallable type: " ++ vType val ++ " " ++ show pos
+
+zipParams :: [Ident] -> [Cell] -> Interpreter EnvrState
+zipParams idents cells = do
+    zipped <- helper (map getName idents) cells
+    return (Environment zipped) where
+        helper [] [] = return []
+        helper [] (_:_) = throwRuntimeErr $ "Too many arguments given for this function."
+        helper (_:_) [] = throwRuntimeErr $ "Not enough arguments given for this call."
+        helper (i:is') (c:cs) = do
+            rest <- helper is' cs
+            return $ (i,c):rest
+
+envLookup :: Ident -> Interpreter Cell
+envLookup (Ident name depth pos) = do
+    envs <- getEnvStack
+    --liftIO $ putStrLn (printEnvStack envs)
+    helper envs depth where
+        helper :: [EnvrState] -> Int -> Interpreter Cell
+        helper _ (-1) = throwRuntimeErr $ "Failed to resolve \"" ++ name ++ "\"!" ++ show pos
+        helper [] _ = throwRuntimeErr $ "Ran out of environments to look through! Ident: \"" ++ name ++ "\""
+        helper (e:_) 0 = case findRef e name of
+            Just ref -> return ref
+            Nothing -> throwRuntimeErr $ "Could not find \"" ++ name ++ "\" declared in said scope, tried to go " ++ (show depth) ++ " shells up." ++ show pos
+        helper (_:es) i = helper es (i-1)
+
+-- printEnvStack :: [EnvrState] -> String
+-- printEnvStack [] = ""
+-- printEnvStack (e:es) = "(" ++ printEnv e ++ ")" ++ printEnvStack es
+
+-- printEnv :: EnvrState -> String
+-- printEnv (Environment list) = helper list where
+--     helper [] = "[]"
+--     helper ((val, _):rest) = (show val) ++ helper rest
+
 
 catchRuntimeErr :: GenInterpreter e a -> (e -> GenInterpreter e a) -> GenInterpreter e a
 (CheckT ma) `catchRuntimeErr` handler = CheckT $ do
@@ -233,7 +285,6 @@ catchRuntimeErr :: GenInterpreter e a -> (e -> GenInterpreter e a) -> GenInterpr
             RuntimeError e -> runCheckT (handler e)
             z -> return (Error z)
 
--- GenInterpreter e a = CheckT (Control e) (StateT InterpreterState IO) a
 
 catchBreak :: GenInterpreter e () -> GenInterpreter e Bool
 catchBreak (CheckT ma) = CheckT $ do
@@ -243,6 +294,15 @@ catchBreak (CheckT ma) = CheckT $ do
         Error CtrlBreak -> do
             return (Checked True)
         Error (RuntimeError e) -> return $ Error (RuntimeError e)
+        Error other -> return (Error other)
+
+catchReturn :: GenInterpreter e () -> GenInterpreter e Value
+catchReturn (CheckT ma) = CheckT $ do
+    a <- ma
+    case a of
+        Checked _ -> return (Checked Nil)
+        Error (CtrlReturn val) -> return (Checked val)
+        Error other -> return (Error other)
         
 
 (%==) :: BinFunc Value
@@ -251,12 +311,6 @@ catchBreak (CheckT ma) = CheckT $ do
 (BoolVal x) %== (BoolVal y) = return $ BoolVal (x == y)
 x %== y = throwRuntimeErr $ binErrStr x y "=="
 
--- (%/=) :: BinFunc Value
--- (NumVal x) %/= (NumVal y) = return $ BoolVal (x /= y)
--- (StringVal x) %/= (StringVal y) = return $ BoolVal (x /= y)
--- (BoolVal x) %/= (BoolVal y) = return $ BoolVal (x /= y)
--- x %/= y = lift $ Error $ 
---     "Operands " ++ (show x) ++ " and " ++ (show y) ++ " not defined for '!='"
 (%/=) :: BinFunc Value
 x %/= y = do
     z <- x %== y
@@ -318,3 +372,6 @@ unaErrStr :: Value -> String -> String
 unaErrStr x op = 
     "Operand " ++ (show x) ++ " not defined for operation " ++ op
 
+stripSuffix :: Eq a => [a] -> [a] -> Maybe [a]
+stripSuffix suf xs =
+  reverse <$> stripPrefix (reverse suf) (reverse xs)

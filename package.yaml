@@ -27,6 +27,7 @@ dependencies:
 default-extensions:
   - FlexibleInstances
   - MultiParamTypeClasses
+  - ScopedTypeVariables
 
 ghc-options:
 - -Wall

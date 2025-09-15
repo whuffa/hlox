@@ -1,0 +1,38 @@
+//Simple implementation of the bisection method!
+
+fun f(x) {
+    return x*x - 2;
+}
+
+var n1 = 1;
+var n2 = 1000;
+
+var eps = 0.00001;
+
+var a = 4;
+var b = 5;
+
+var fa = f(a);
+var fb = f(b);
+
+var error = b - a;
+
+for (var n = n1; n < n2; n = n + 1) {
+    error = error/2;
+    var c = (a + b) /2;
+    var fc = f(c);
+    
+    if (error < eps) {
+        print "Convergence";
+        break;
+    }
+    if (fa * fc < 0) {
+        b = c;
+        fb = fc;
+    } else {
+        a = c;
+        fa = fc;
+    }
+
+    print c;
+}

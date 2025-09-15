@@ -10,6 +10,7 @@ import Prelude hiding(lex)
 import Tok(Token)
 import Control.Monad.IO.Class(MonadIO(..))
 import System.Environment(getArgs)
+import Resolver
 
 
 main :: IO ()
@@ -22,7 +23,11 @@ main = do
             code <- hGetContents handle
             case lp code of
                 Error msg -> putStrLn msg
-                Checked pgrm -> run (interpret pgrm)
+                Checked pgrm -> do
+                    rpgrm <- resolve pgrm
+                    case rpgrm of
+                        Error msg -> putStrLn msg
+                        Checked rstmts -> run (interpret rstmts)
         _ -> putStrLn "Usage: Lox <filename>"
 
 

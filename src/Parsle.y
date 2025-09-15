@@ -41,6 +41,8 @@ import Tok
     "while" { Token (TokenKeyword "while") _ }
     "for"   { Token (TokenKeyword "for") _ }
     "break" { Token (TokenKeyword "break") _ }
+    "fun"   { Token (TokenKeyword "fun") _ }
+    "return" {Token (TokenKeyword "return") _ }
     literal { Token (Lit _) _ }
     ident   { Token (TokenIdent _) _ }
 
@@ -60,10 +62,13 @@ Prgm :: { [Stmt] }
     : Stm Prgm     { $1 : $2 }
     | Stm          { $1 : [] }
 
+ObjIdent :: { Ident }
+            : ident { let Token (TokenIdent name) pos = $1 in Ident name (-1) pos }
+
 Stm :: { Stmt }
     : "print" Exp ';'   { Print $2 (getPos $1)}
-    | "var" ident ';'   { Declaration $2 Nothing (getPos $1) }
-    | "var" ident '=' Exp ';' { Declaration $2 (Just $4) (getPos $1) }
+    | "var" ObjIdent ';'   { Declaration $2 (Litr LNil (getPos $1)) (getPos $1) }
+    | "var" ObjIdent '=' Exp ';' { Declaration $2 $4 (getPos $1) }
     | Exp ';'           { StmtExpr $1 }
     | '{' Prgm '}'      { Block $2 (getPos $1) }
     | "if" '(' Exp ')' Stm    { IfElse $3 $5 Nothing (getPos $1) }
@@ -71,6 +76,9 @@ Stm :: { Stmt }
     | "while" '(' Exp ')' Stm         { While $3 $5 (getPos $1)}
     | "for" '(' OptInit OptCond OptIter ')' Stm { createForLoop $3 $4 $5 $7 (getPos $1) }
     | "break" ';' { Break (getPos $1) }
+    | "fun" ObjIdent '(' IdentList ')' '{' Prgm '}' { let func = Lambda [] (reverse $4) $7 (getPos $1) in Declaration $2 func (getPos $1)}
+    | "return" ';'    { Return (Litr LNil (getPos $1)) (getPos $1) }
+    | "return" Exp ';' { Return $2 (getPos $1) }
 
 OptInit :: { [Stmt] }
         : Stm { [$1] }
@@ -83,6 +91,16 @@ OptCond :: { Expr }
 OptIter :: { [Stmt] }
         : Exp { [StmtExpr $1] }
         |     { [] }
+
+ExpList :: { [Expr] }
+        : Exp ',' ExpList   { $1 : $3 }
+        | Exp               { [$1] }
+        |                   { [] }
+
+IdentList :: { [Ident] }
+          : ObjIdent ',' IdentList { $1 : $3 }
+          | ObjIdent               { [$1] }
+          |                        { [] }
 
 Exp :: { Expr }
     : Exp '+' Exp    { Binary Add $1 $3 (getPos $2) }
@@ -101,8 +119,11 @@ Exp :: { Expr }
     | Exp '>' Exp    { Binary GT $1 $3 (getPos $2) }
     | Exp '<' Exp    { Binary LT $1 $3 (getPos $2) }
     | literal        { let Token (Lit lit) pos = $1 in Litr lit pos }
-    | ident          { Identifier $1 }
-    | ident '=' Exp  { Assign $1 $3 (getPos $2) }
+    | ObjIdent       { Identifier $1 }
+    | ObjIdent '=' Exp  { Assign $1 $3 (getPos $2) }
+    | "fun" '(' IdentList ')' '{' Prgm '}' { Lambda [] (reverse $3) $6 (getPos $1) }
+    | Exp '(' ExpList ')' { Call $1 (reverse $3) (getPos $2) }
+
 
 {
 

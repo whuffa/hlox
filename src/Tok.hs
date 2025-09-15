@@ -13,11 +13,23 @@ data TokenType
     | TokenKeyword String 
     | TokenIdent String
     | EOF
-    deriving (Eq, Show)
+    deriving (Eq)
+
+instance Show TokenType where
+    show :: TokenType -> String
+    show (Lit literal) = show literal
+    show (Symbol str) = "Symbol: " ++ str
+    show (TokenKeyword str) = "Keyword: " ++ str
+    show (TokenIdent str ) = "Identifier: " ++ str
+    show EOF = "EOF"
 
 data Pos = Pos { getLine :: Int,
                  getColumn :: Int }
-                 deriving(Show, Eq)
+                 deriving Eq
+
+instance Show Pos where
+    show :: Pos -> String
+    show (Pos x y) = "(Line " ++ show x ++ ", Column " ++ show y ++ ")"
 
 instance Semigroup Pos where
     (<>) :: Pos -> Pos -> Pos
@@ -27,7 +39,11 @@ instance Monoid Pos where
     mempty = Pos 0 0
 data Token = Token { getType :: TokenType,
                      getPos :: Pos }
-                     deriving(Show, Eq)
+                     deriving(Eq)
+
+instance Show Token where
+    show :: Token -> String
+    show (Token tt pos) = "Token (" ++ (show tt) ++ ")" ++ (show pos)
 
 stringPos :: Pos -> String
 stringPos (Pos x y) = "(Line " ++ (show x) ++ ", Col " ++ (show y)  ++ ")"

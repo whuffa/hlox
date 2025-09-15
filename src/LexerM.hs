@@ -126,14 +126,6 @@ lexDouble = do
             return $ Token tt pos
         _ -> lift $ Error $ "Error lexing number: " ++ (show first) ++ stringPos pos
 
---needs to be updated so that it increments cols?
--- lenSpan :: (a -> Bool) -> [a] -> (Int, [a], [a])
--- lenSpan p zs = helper (0, zs, []) where
---     helper (count, [], xs) = (count, [], reverse xs)
---     helper (count, xs@(x:xs'), ys)
---         | p x = helper (count + 1, xs', x:ys)
---         | otherwise = (count, xs, reverse ys)
-
 lenSpan :: (Char -> Bool) -> Bool -> Lexer String
 lenSpan p strict = do
     (code, pos) <- get
@@ -185,25 +177,11 @@ lexSymbol = symHelper symbols where
             Just rest
                 | s == "//" -> lexCommentLine
                 | s == "/*" -> lexCommentBlock
-                | s == "*/" -> lift $ Error ("Unexpected end of comment block " ++ stringPos pos)
+                | s == "*/" -> throwError ("Unexpected end of comment block " ++ stringPos pos)
                 | otherwise -> do
                     let newPos = account pos s
                     put (rest, newPos)
                     return (Token (Symbol s) newPos)
--- lexString :: Lexer Token
--- lexString = do
---     (_str, pos) <- get
---     stripped <- checkPrefix "\""
---     let (first, rest) = span (/= '\"') stripped
---     case rest of
---         '\"':cs -> do
---             let colOffset = 1 + (length first) --length of quotes + string
---                 newPos = addCols pos colOffset
---             put (cs, newPos) 
---             let tt = Lit $ Str first
---             return $ Token tt pos
---         _ -> do
---             lift (Error ("Expected '\"' " ++ stringPos pos))
 
 lexString :: Lexer Token
 lexString = do

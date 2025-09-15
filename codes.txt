@@ -1,4 +1,1 @@
-for (var i = 0;; i = i + 1) {
-    print i;
-    if (i >= 6) break;
-} 
+print fun(x) { return x*x + 2; } (3);

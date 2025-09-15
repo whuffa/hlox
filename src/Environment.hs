@@ -1,36 +1,14 @@
-module Environment(Environment(..), lookup, declare, define) where
-
+module Environment(Environment(..), findRef, insertRef) where
+    
 import Prelude hiding(lookup)
-import Check
-import Variable
-import ListMap
+import qualified ListMap as LM
+import Data.IORef
 
-data Environment k v
-    = Environment { getMap :: Map k v, 
-                    parent :: Maybe (Environment k v) }
-                    deriving(Show)
+--type EnvMap k v = LM.Map k (IORef (Maybe v))
+newtype Environment k v = Environment { getMap :: LM.Map k (IORef v) }
 
-lookup :: (Eq k) => Environment k v -> k -> Variable v
-lookup env k = helper (Just env) where
-    helper Nothing = Undeclared
-    helper (Just (Environment lmap p)) = case find lmap k of
-        Undeclared -> helper p
-        val -> val
+findRef :: (Eq k) => Environment k v -> k -> Maybe (IORef v)
+findRef (Environment lmap) = LM.find lmap
 
-declare :: (Eq k) => Environment k v -> k -> Check String (Environment k v)
-declare (Environment lmap p) k = case find lmap k of
-    Undeclared -> Checked (Environment nmap p) where
-        nmap = insert lmap (k, Nothing)
-    _ -> Error "Variable already declared in this scope."
-
-
-define :: (Eq k) => Environment k v -> k -> v -> Check String (Environment k v)
-define env key val = let
-    assoc = (key, Just val)
-    helper Nothing = Error "Cannot define undeclared variable."
-    helper (Just (Environment lmap p)) = case find lmap key of
-        Undeclared -> helper p
-        _ -> Checked (Environment nmap p) where
-            nmap = insert lmap assoc
-    in helper (Just env)
-
+insertRef :: (Eq k) => Environment k v -> (k, IORef v) -> Environment k v
+insertRef (Environment lmap) t = Environment (LM.insert lmap t) 
