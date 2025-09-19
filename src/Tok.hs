@@ -1,30 +1,32 @@
 {-# LANGUAGE InstanceSigs #-}
-module Tok (Literal(..), Token(..), TokenType(..), Pos(..), stringPos) where
+module Tok (Literal(..), Token(..), TokenType(..), Pos(..)) where
 
-data Literal = Number Double
-             | Str String
-             | LBool Bool
+import qualified Data.Text as T
+
+data Literal = Number !Double
+             | Str !T.Text
+             | LBool !Bool
              | LNil
     deriving (Show, Eq)
 
 data TokenType 
-    = Lit Literal
-    | Symbol String 
-    | TokenKeyword String 
-    | TokenIdent String
+    = Lit !Literal
+    | Symbol !T.Text 
+    | TokenKeyword !T.Text 
+    | TokenIdent !T.Text
     | EOF
     deriving (Eq)
 
 instance Show TokenType where
     show :: TokenType -> String
     show (Lit literal) = show literal
-    show (Symbol str) = "Symbol: " ++ str
-    show (TokenKeyword str) = "Keyword: " ++ str
-    show (TokenIdent str ) = "Identifier: " ++ str
+    show (Symbol str) = "Symbol: " ++ show str
+    show (TokenKeyword str) = "Keyword: " ++ show str
+    show (TokenIdent str ) = "Identifier: " ++ show str
     show EOF = "EOF"
 
-data Pos = Pos { getLine :: Int,
-                 getColumn :: Int }
+data Pos = Pos { getLine :: !Int,
+                 getColumn :: !Int }
                  deriving Eq
 
 instance Show Pos where
@@ -37,13 +39,10 @@ instance Semigroup Pos where
 instance Monoid Pos where
     mempty :: Pos
     mempty = Pos 0 0
-data Token = Token { getType :: TokenType,
-                     getPos :: Pos }
+data Token = Token { getType :: !TokenType,
+                     getPos :: !Pos }
                      deriving(Eq)
 
 instance Show Token where
     show :: Token -> String
     show (Token tt pos) = "Token (" ++ (show tt) ++ ")" ++ (show pos)
-
-stringPos :: Pos -> String
-stringPos (Pos x y) = "(Line " ++ (show x) ++ ", Col " ++ (show y)  ++ ")"

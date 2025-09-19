@@ -1,14 +1,15 @@
-module Resolver(resolve) where
+module Resolver(resolve, ResolverState, resolve', initResolver) where
 
+import Prelude hiding (lookup)
 import Operators ( Stmt(..), Expr(..), Ident(..) )
 import Check
 import Control.Monad.Except
 import Control.Monad.State
-import ListMap
-import Tok
-import Data.List(nubBy)
+import Data.Map.Strict
+import qualified Data.Set as S
+import qualified Data.Text as T
 
-type ScopeSet = Map String Bool
+type ScopeSet = Map T.Text Bool
 
 data FuncType
     = NotFunc
@@ -19,7 +20,7 @@ data FrameType
     | FuncBody
     deriving (Show, Eq)
 
-type Closure = [Ident]
+type Closure = S.Set Ident
 type Frame = (FrameType, ScopeSet)
 
 data ResolverState = ResolverState {stateFunc :: FuncType,
@@ -29,19 +30,24 @@ data ResolverState = ResolverState {stateFunc :: FuncType,
 type Resolver a = CheckT String (StateT ResolverState IO) a
 
 initialEnv :: ScopeSet
-initialEnv = []
+initialEnv = empty
 
-initialState :: ResolverState
-initialState = ResolverState (NotFunc) [(Scope, initialEnv)] [] 0
+initResolver :: ResolverState
+initResolver = ResolverState (NotFunc) [(Scope, initialEnv)] [] 0
 
 runResolver :: Resolver [Stmt] -> IO (Check String [Stmt])
 runResolver rstmt = do
-    (stmts, _) <- (runStateT $ runCheckT rstmt) (initialState)
+    (stmts, _) <- runResolverState rstmt (initResolver)
     return stmts
+
+runResolverState :: Resolver [Stmt] -> ResolverState -> IO (Check String [Stmt], ResolverState)
+runResolverState = runStateT . runCheckT
 
 -- class Resolvable a where --maybe more readable if we do this?
 --     resolved :: (a -> Resolver a)
 
+resolve' :: [Stmt] -> ResolverState -> IO (Check String [Stmt], ResolverState)
+resolve' stmts = runResolverState (resolveProgram stmts)
 
 
 resolve :: [Stmt] -> IO (Check String [Stmt])
@@ -78,7 +84,7 @@ pushClosure closure = do
 beginClosure :: Resolver ()
 beginClosure = do
     pushFrame (FuncBody, initialEnv)
-    pushClosure []
+    pushClosure S.empty
 
 
 endClosure :: Resolver [Ident]
@@ -87,9 +93,7 @@ endClosure = do
     (ft, _) <- popFrame
     case ft of
         Scope -> throwError $ "Something went wrong - tried to pop a function body, got normal scope."
-        FuncBody -> do
-            let clos = (reverse . nubBy (\(Ident x _ _) (Ident y _ _) -> x == y)) closure
-            return clos
+        FuncBody -> return (S.elems closure)
 
 
 incrLoop :: Resolver()
@@ -144,7 +148,7 @@ popFrame = do
             return s
 
 beginScope :: Resolver ()
-beginScope = pushFrame (Scope, [])
+beginScope = pushFrame (Scope, empty)
 
 endScope :: Resolver ()
 endScope = do 
@@ -188,11 +192,11 @@ resolveStmt (While condition stmt pos) = do
     return (While rc rs pos)
 resolveStmt n@(Break pos) = do
     depth <- getLoopDepth
-    if (depth > 0) then return n else throwError $ "Break statements must be used within loops. " ++ stringPos pos
+    if (depth > 0) then return n else throwError $ "Break statements must be used within loops. " ++ show pos
 resolveStmt (Return expr pos) = do
     isFunc <- getStateFunc
     case isFunc of
-        NotFunc -> throwError $ "Return statements must be used within functions. " ++ stringPos pos
+        NotFunc -> throwError $ "Return statements must be used within functions. " ++ show pos
         _ -> do
             re <- resolveExpr expr
             return (Return re pos)
@@ -201,33 +205,39 @@ resolveStmt (Return expr pos) = do
 declare :: Ident -> Resolver()
 declare (Ident name _ _) = do
     (ft, scope) <- popFrame
-    pushFrame (ft, (insert scope (name, False)))
+    pushFrame (ft, (insert name False scope))
 
 
 define :: Ident -> Resolver()
 define (Ident name _ _) = do
     (ft, scope) <- popFrame
-    pushFrame (ft, (insert scope (name, True)))
+    pushFrame (ft, (insert name True scope))
 
 resolveExpr :: Expr -> Resolver Expr
 resolveExpr n@(Litr _ _) = return n
+
 resolveExpr (Binary op l r pos) = do
     rl <- resolveExpr l
     rr <- resolveExpr r
     return (Binary op rl rr pos)
+
 resolveExpr (Unary op o pos) = do
     ro <- resolveExpr o
     return (Unary op ro pos)
+
 resolveExpr (Group expr pos) = do
     re <- resolveExpr expr
     return (Group re pos)
+
 resolveExpr (Identifier ident) = do
-    rIdent <- resolveIdent' ident
+    rIdent <- resolveIdent ident
     return (Identifier rIdent)
+
 resolveExpr (Assign ident expr pos) = do
     re <- resolveExpr expr
     rIdent <- resolveIdent ident
     return (Assign rIdent re pos)
+
 resolveExpr (Lambda _ idents stmts pos) = do
     curFunc <- getStateFunc
     putStateFunc Function
@@ -235,57 +245,29 @@ resolveExpr (Lambda _ idents stmts pos) = do
     _ <- mapM define idents
     rstmts <- mapM resolveStmt stmts
     closure <- endClosure
+    liftIO $ putStrLn $ show closure
     putStateFunc curFunc
     return (Lambda closure idents rstmts pos)
+    
 resolveExpr (Call expr args pos) = do
     re <- resolveExpr expr
     ra <- mapM resolveExpr args
     return (Call re ra pos)
 
 resolveIdent :: Ident -> Resolver Ident
-resolveIdent = lookupIdent
-
-
-lookupIdent :: Ident -> Resolver Ident
-lookupIdent (Ident name _ pos) = helper 0 where
-    helper :: Int -> Resolver Ident
-    helper i = do
-        frame@(ft, scope) <- popFrame
-        case find scope name of
-            Just False -> throwError $ "Cannot initialize a variable with itself."
-            Just True -> do
-                pushFrame frame
-                return (Ident name i pos)
-            Nothing -> case ft of
-                Scope -> do
-                    nIdent <- helper (i+1)
-                    pushFrame frame
-                    return nIdent
-                FuncBody -> do
-                    closure <- popClosure
-                    nClosure <- if any (\x -> getName x == name) closure
-                        then return closure
-                        else do
-                            nIdent <- helper 1
-                            return (nIdent:closure)
-                    pushClosure nClosure
-                    pushFrame frame
-                    return (Ident name (i+1) pos)
-
-resolveIdent' :: Ident -> Resolver Ident
-resolveIdent' ident = do
+resolveIdent ident = do
     frames <- getFrames
     closures <- getClosures
-    (ident', closures') <- lookupIdent' ident frames closures
+    (ident', closures') <- lookupIdent ident frames closures
     putClosures closures'
     return ident'
 
-lookupIdent' :: Ident -> [Frame] -> [Closure] -> Resolver (Ident, [Closure])
-lookupIdent' (Ident name _ pos) = helper 0 where
+lookupIdent :: Ident -> [Frame] -> [Closure] -> Resolver (Ident, [Closure])
+lookupIdent (Ident name _ pos) = helper 0 where
     helper :: Int -> [Frame] -> [Closure] -> Resolver (Ident, [Closure])
-    helper _ [] _ = throwError $ "Could not resolve variable \"" ++ name ++ "\"."
+    helper _ [] _ = throwError $ "Could not resolve variable \"" ++ T.unpack name ++ "\"."
     helper i ((ft, scope):fs) closures = do
-        case find scope name of
+        case lookup name scope of
             Just False -> throwError $ "Cannot initialize a variable with itself!"
             Just True -> do
                 return ((Ident name i pos),closures)
@@ -298,6 +280,6 @@ lookupIdent' (Ident name _ pos) = helper 0 where
                             then return (c:cs)
                             else do
                                 (ident', cs') <- helper 1 fs cs
-                                return ((ident':c):cs')
+                                return ((S.insert ident' c):cs')
                         return ((Ident name (i+1) pos), cs')
 

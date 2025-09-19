@@ -1,7 +1,7 @@
 {-# LANGUAGE InstanceSigs #-}
-module Interpreter(run, interpret, Interpreter) where
+module Interpreter(interpret, Interpreter, InterpreterState, interpret', Control(..), initInterpreter ) where
 
-import Prelude hiding (EQ, GT, LT)
+import Prelude hiding (EQ, GT, LT, lookup)
 import Control.Monad.State
 import Control.Monad.Except
 import Control.Monad.IO.Class()
@@ -11,6 +11,7 @@ import Operators
 import Environment
 import Data.IORef
 import Data.List(stripPrefix)
+import qualified Data.Text as T
 
 data Function = Function { getClosure :: EnvrState,
                            getIdents :: [Ident],
@@ -19,7 +20,7 @@ data Function = Function { getClosure :: EnvrState,
 data Value
     = BoolVal Bool
     | NumVal Double
-    | StringVal String
+    | StringVal T.Text
     | LambdaVal Function
     | Nil
 
@@ -29,7 +30,7 @@ instance Show Value where
     show (NumVal d) = case stripSuffix ".0" (show d) of
         Just trim -> trim
         Nothing -> (show d)
-    show (StringVal str) = str
+    show (StringVal str) = T.unpack str
     show (LambdaVal _) = "Please don't try and show functions :)"
     show Nil = "nil"
 
@@ -46,7 +47,7 @@ instance HasType Value where
 
 data InterpreterState = InterpreterState {envStack :: [EnvrState]}
 type Cell = IORef Value
-type EnvrState = Environment String Value
+type EnvrState = Environment T.Text Value
 data Control e
     = CtrlBreak
     | CtrlReturn Value
@@ -59,10 +60,11 @@ type Interpreter a = GenInterpreter String a
 type BinFunc a = Value -> Value -> Interpreter a
 type UnaFunc a = Value -> Interpreter a
 
-
+initInterpreter :: InterpreterState
+initInterpreter = InterpreterState initialEnvStack
 
 initialEnv :: EnvrState
-initialEnv = Environment []
+initialEnv = emptyEnv
 
 initialEnvStack :: [EnvrState]
 initialEnvStack = [initialEnv]
@@ -85,7 +87,7 @@ popEnv = do
             return e
 
 beginEnv :: Interpreter ()
-beginEnv = pushEnv (Environment [])
+beginEnv = pushEnv emptyEnv
 
 endEnv :: Interpreter ()
 endEnv = do
@@ -102,18 +104,20 @@ putEnvStack env = do
     s <- get
     put (s {envStack = env})
 
-run :: Interpreter () -> IO ()
-run intr = do
-    (res, _) <- (runStateT $ runCheckT intr) (InterpreterState initialEnvStack)
+runInterpreter :: Interpreter () -> InterpreterState -> IO (Check (Control String) (), InterpreterState)
+runInterpreter = runStateT . runCheckT
+
+interpret :: [Stmt] -> IO ()
+interpret intr = do
+    (res, _) <- (runInterpreter (executeProgram intr)) (InterpreterState initialEnvStack)
     case res of
         Error c -> case c of
             RuntimeError e -> putStrLn e
             o -> putStrLn $ "Probably should have caught " ++ (show o ) ++ " earlier, huh? Look what you fucking did. You buffoon."
         Checked _ -> return ()
 
-
-interpret :: [Stmt] -> Interpreter ()
-interpret = executeProgram
+interpret' :: [Stmt] -> InterpreterState -> IO (Check (Control String) (), InterpreterState)
+interpret' pgrm = runInterpreter (executeProgram pgrm)
 
 executeProgram :: [Stmt] -> Interpreter ()
 executeProgram stmts = do
@@ -158,7 +162,7 @@ execute (Return expr _) = do
 
 truthiness :: Value -> Bool
 truthiness (NumVal 0) = False
-truthiness (StringVal "") = False
+truthiness (StringVal T.Empty) = False
 truthiness (BoolVal bool) = bool
 truthiness Nil = False
 truthiness _ = True
@@ -226,7 +230,7 @@ evaluate (Lambda nonlocals params stmts _) = do
     refs <- mapM envLookup nonlocals
     endEnv
     let names = map getName nonlocals
-        closure = Environment (zip names refs)
+        closure = fromAscList (zip names refs)
     (return . LambdaVal) (Function closure params stmts)
 evaluate (Call expr argExprs pos) = do
     callee <- evaluate expr
@@ -245,7 +249,7 @@ evaluate (Call expr argExprs pos) = do
 zipParams :: [Ident] -> [Cell] -> Interpreter EnvrState
 zipParams idents cells = do
     zipped <- helper (map getName idents) cells
-    return (Environment zipped) where
+    return (fromList zipped) where
         helper [] [] = return []
         helper [] (_:_) = throwRuntimeErr $ "Too many arguments given for this function."
         helper (_:_) [] = throwRuntimeErr $ "Not enough arguments given for this call."
@@ -256,14 +260,13 @@ zipParams idents cells = do
 envLookup :: Ident -> Interpreter Cell
 envLookup (Ident name depth pos) = do
     envs <- getEnvStack
-    --liftIO $ putStrLn (printEnvStack envs)
     helper envs depth where
         helper :: [EnvrState] -> Int -> Interpreter Cell
-        helper _ (-1) = throwRuntimeErr $ "Failed to resolve \"" ++ name ++ "\"!" ++ show pos
-        helper [] _ = throwRuntimeErr $ "Ran out of environments to look through! Ident: \"" ++ name ++ "\""
+        helper _ (-1) = throwRuntimeErr $ "Failed to resolve \"" ++ T.unpack name ++ "\"!" ++ show pos
+        helper [] _ = throwRuntimeErr $ "Ran out of environments to look through! Ident: \"" ++ T.unpack name ++ "\""
         helper (e:_) 0 = case findRef e name of
             Just ref -> return ref
-            Nothing -> throwRuntimeErr $ "Could not find \"" ++ name ++ "\" declared in said scope, tried to go " ++ (show depth) ++ " shells up." ++ show pos
+            Nothing -> throwRuntimeErr $ "Could not find \"" ++ T.unpack name ++ "\" declared in said scope, tried to go " ++ (show depth) ++ " shells up." ++ show pos
         helper (_:es) i = helper es (i-1)
 
 -- printEnvStack :: [EnvrState] -> String
@@ -336,11 +339,14 @@ x %>= y = do
     (%!) z
     `catchError` (\_ -> throwRuntimeErr $ binErrStr x y ">=")
 
+showT :: (Show a) => a -> T.Text
+showT = T.pack . show
+
 (%+) :: BinFunc Value
 (NumVal x) %+ (NumVal y) = return $ NumVal (x + y)
-(NumVal x) %+ (StringVal y) = return $ StringVal $ show x ++ y
-(StringVal x) %+ (NumVal y) = return $ StringVal $ x ++ (show y)
-(StringVal x) %+ (StringVal y) = return $ StringVal (x ++ y)
+(NumVal x) %+ (StringVal y) = return $ StringVal $ (showT x) `T.append` y
+(StringVal x) %+ (NumVal y) = return $ StringVal $ x `T.append` (showT y)
+(StringVal x) %+ (StringVal y) = return $ StringVal (x `T.append` y)
 x %+ y = throwRuntimeErr $ binErrStr x y "+"
 
 (%-) :: BinFunc Value

@@ -1,10 +1,12 @@
 {
+{-# LANGUAGE OverloadedStrings #-}
 module Parsle (parsle) where
 import Prelude hiding (LT, GT, EQ, id)
 import Check(Check(..))
 import Data.Char
 import Operators
 import Tok
+import qualified Data.Text as T
 }
 
 %name parsle
@@ -135,7 +137,7 @@ createForLoop initial condition increment body pos = Block outerBlock pos where
 
 parseError :: [Token] -> Check String a
 parseError [] = Error "Parse error: Unexpected end of input."
-parseError ((Token tt pos):_) = Error $ "Unexpected token: " ++ (show tt) ++ stringPos pos
+parseError ((Token tt pos):_) = Error $ "Unexpected token: " ++ show tt ++ show pos
 
 
 }
