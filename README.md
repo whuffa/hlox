@@ -1,1 +1,7 @@
-# interpreting
+# hlox
+hlox is an interpreter for the language *Lox* from Robert Nystrom's *Crafting Interpreters* implemented with Haskell. Modeled after the tree-walker intepreter *jlox* from the book, hlox differs in a few ways outside of its source language:
+- *hlox* uses **Happy**, a LALR parser generator. *jlox* uses a custom recursive descent parser.
+- Differences in lexical scoping
+  - *jlox*'s lexical scoping solution uses a hybrid between stack-based offset scoping and a enclosing environment abstraction. For resolution within the same lexical scope, variables are resolved by the number of scopes in between their use and their declaration. However, when interpreting a function body, *jlox* just attaches the reference to the current environment, which in turn has a reference to the enclosing environment and so on.
+  - Because of Haskell's immutable data structures, *hlox* takes a different approach by first tying each unique variable to a unique reference, and each environment is a map binding identifiers to references. For resolution within the same lexical scope, it works much the same as *jlox* except that in this implementation scopes and environments are managed in a global stack while resolving and interpreting. Thus, to tackle resolution outside of the same lexical scope, each new lexical scope keeps a set of all identifiers used within that are nonlocal - at runtime, the references are fetched to create the minimum required closure for each function definition.
+- *hlox* doesn't have any OOP capabilites. It didn't seem to present any interesting or new challenges but we'll see where things go from here. 
